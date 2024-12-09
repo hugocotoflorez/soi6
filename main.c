@@ -11,6 +11,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* Verbose: print debug messages
+ * 0: none
+ * 1: some msg
+ * 2: sync msg
+ */
+#define VERBOSE 1
 void
 pass()
 {
@@ -21,16 +27,19 @@ static int BARRIER = 0;
 void
 __awake(int who)
 {
-    puts("SEND AWAKE");
+    if (VERBOSE > 1)
+        puts("SEND AWAKE");
     kill(who, SIGUSR1);
     pause();
-    puts("AWAKE DONE");
+    if (VERBOSE > 1)
+        puts("AWAKE DONE");
 }
 
 void
 barrier_handler()
 {
-    puts("BARRIER INC");
+    if (VERBOSE > 1)
+        puts("BARRIER INC");
     ++BARRIER;
     kill(getppid(), SIGUSR1);
 }
@@ -38,12 +47,14 @@ barrier_handler()
 void
 __wait()
 {
-    puts("WAITING");
+    if (VERBOSE > 1)
+        puts("WAITING");
     static int WAIT_COUNTER = 0;
     ++WAIT_COUNTER;
     while (BARRIER < WAIT_COUNTER)
         sched_yield();
-    puts("CONTINUING");
+    if (VERBOSE > 1)
+        puts("CONTINUING");
 }
 
 int
@@ -77,7 +88,7 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
 
     memset(buf, 0, new_length);
 
-    length_med = (length + 1) / 2;
+    length_med = (length + 1) >> 1;
 
 #define do_the_stuff()                          \
     switch (map_in[i])                          \
@@ -104,7 +115,7 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
     memcpy(map_out, buf, mid_j);
     __awake(child);
 
-    for (; i < length; ++i)
+    for (i = length_med; i < length; ++i)
     {
         do_the_stuff();
     }
@@ -132,7 +143,7 @@ do_child_stuff(char *map_out, int length)
     }
 
 
-    length_med = (length + 1) / 2;
+    length_med = (length + 1) >> 1;
 
 #define do_the_stuff()                           \
     switch (map_out[i])                          \
@@ -140,7 +151,7 @@ do_child_stuff(char *map_out, int length)
         case '0' ... '9':                        \
             iterations = map_out[i] - '0';       \
             for (int j = 0; j < iterations; ++j) \
-                buf[i+j] = '*';                  \
+                buf[i + j] = '*';                \
             break;                               \
     }
 
@@ -244,19 +255,36 @@ main(int argc, char *argv[])
             exit(1);
 
         case 0: // child
-            puts("SETTING HANDLER");
+            if (VERBOSE > 1)
+                puts("SETTING HANDLER");
             signal(SIGUSR1, barrier_handler);
             kill(getppid(), SIGUSR1);
-            puts("DOING CHILD STUFF");
+            if (VERBOSE > 1)
+                puts("DOING CHILD STUFF");
             do_child_stuff(map_out, new_length);
             exit(0);
 
         default: // parent
-            puts("WAITING UNTIL HANDLER IS SET");
+            if (VERBOSE > 1)
+                puts("WAITING UNTIL HANDLER IS SET");
             pause();
-            puts("DOING PARENT STUFF");
+            if (VERBOSE > 1)
+                puts("DOING PARENT STUFF");
             do_parent_stuff(map_in, map_out, length, new_length, child);
             break;
     }
+
+    if (munmap(map_in, length))
+    {
+        perror("munmap 1");
+        return 1;
+    }
+
+    if (munmap(map_out, new_length))
+    {
+        perror("munmap 2");
+        return 1;
+    }
+
     return 0;
 }

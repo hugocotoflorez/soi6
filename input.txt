@@ -1,4 +1,4 @@
-uno:1a
-dos:2b
-tres:3c
-cuatro:4d
+UNO:1A
+DOS:2B
+TRES:3C
+CUATRO:4D
