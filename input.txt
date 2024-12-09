@@ -1,3 +1,4 @@
-ABCDEF
-1 2 3 4 !@#$%%
-asdfgh
+uno:1a
+dos:2b
+tres:3c
+cuatro:4d

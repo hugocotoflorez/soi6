@@ -16,6 +16,36 @@ pass()
 {
 }
 
+static int BARRIER = 0;
+
+void
+__awake(int who)
+{
+    puts("SEND AWAKE");
+    kill(who, SIGUSR1);
+    pause();
+    puts("AWAKE DONE");
+}
+
+void
+barrier_handler()
+{
+    puts("BARRIER INC");
+    ++BARRIER;
+    kill(getppid(), SIGUSR1);
+}
+
+void
+__wait()
+{
+    puts("WAITING");
+    static int WAIT_COUNTER = 0;
+    ++WAIT_COUNTER;
+    while (BARRIER < WAIT_COUNTER)
+        sched_yield();
+    puts("CONTINUING");
+}
+
 int
 get_new_length(char *map, int length)
 {
@@ -30,7 +60,7 @@ get_new_length(char *map, int length)
 }
 
 void
-do_parent_stuff(char *map_in, char *map_out, int length, int new_length)
+do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int child)
 {
     char *buf;
     int   length_med;
@@ -70,7 +100,9 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length)
         do_the_stuff();
     }
     mid_j = j;
+
     memcpy(map_out, buf, mid_j);
+    __awake(child);
 
     for (; i < length; ++i)
     {
@@ -78,6 +110,7 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length)
     }
 
     memcpy(map_out + mid_j, buf + mid_j, new_length - mid_j);
+    __awake(child);
 
 #undef do_the_stuff
     free(buf);
@@ -91,13 +124,13 @@ do_child_stuff(char *map_out, int length)
     int   i;
     int   iterations;
 
+
     if (!(buf = malloc(length)))
     {
         perror("malloc 1");
         return;
     }
 
-    memcpy(buf, map_out, length);
 
     length_med = (length + 1) / 2;
 
@@ -107,9 +140,12 @@ do_child_stuff(char *map_out, int length)
         case '0' ... '9':                        \
             iterations = map_out[i] - '0';       \
             for (int j = 0; j < iterations; ++j) \
-                buf[i++] = '*';                  \
+                buf[i+j] = '*';                  \
             break;                               \
     }
+
+    __wait();
+    memcpy(buf, map_out, length_med);
 
     for (i = 0; i < length_med; ++i)
     {
@@ -117,6 +153,9 @@ do_child_stuff(char *map_out, int length)
     }
 
     memcpy(map_out, buf, length_med);
+
+    __wait();
+    memcpy(buf + length_med, map_out + length_med, length - length_med);
 
     for (; i < length; ++i)
     {
@@ -205,10 +244,18 @@ main(int argc, char *argv[])
             exit(1);
 
         case 0: // child
+            puts("SETTING HANDLER");
+            signal(SIGUSR1, barrier_handler);
+            kill(getppid(), SIGUSR1);
+            puts("DOING CHILD STUFF");
             do_child_stuff(map_out, new_length);
+            exit(0);
 
         default: // parent
-            do_parent_stuff(map_in, map_out, length, new_length);
+            puts("WAITING UNTIL HANDLER IS SET");
+            pause();
+            puts("DOING PARENT STUFF");
+            do_parent_stuff(map_in, map_out, length, new_length, child);
             break;
     }
     return 0;
