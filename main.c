@@ -205,14 +205,9 @@ main(int argc, char *argv[])
             exit(1);
 
         case 0: // child
-            kill(getppid(), SIGUSR1);
-            pause();
             do_child_stuff(map_out, new_length);
-            exit(0);
 
         default: // parent
-            pause();
-            kill(child, SIGUSR1);
             do_parent_stuff(map_in, map_out, length, new_length);
             break;
     }
