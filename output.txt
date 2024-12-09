@@ -2,3 +2,4 @@ uno:*a
 dos:**b
 tres:***c
 cuatro:****d
+*,**,***,****

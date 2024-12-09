@@ -1,2 +1,2 @@
 all:
-	gcc -Wall -Wextra main.c -g -fsanitize=null,address
+	gcc -Wall -Wextra main.c -o programa
