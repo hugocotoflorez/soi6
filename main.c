@@ -11,21 +11,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define V_SILENT 1
-#define V_SYNC   2
-#define V_NOERR  4
-#define V_INFO   8
-/* Verbose: print debug messages
- * V_SILENT: none except error
- * V_SYNC: sync msg
- * V_NOERR: do no show if(VERBOSE &~ V_NOERR)perror msg
- * V_INFO: some msg
- */
-#define VERBOSE (V_SILENT)
 
+static int child_running = 0;
 void
 pass()
 {
+    child_running = 1;
 }
 
 /* Sistema de barreras para manejar la sincronizacion entre procesos
@@ -52,19 +43,13 @@ static int BARRIER = 0;
 void
 __awake(int who)
 {
-    if (VERBOSE & V_SYNC)
-        puts("SEND AWAKE");
     kill(who, SIGUSR1);
     pause();
-    if (VERBOSE & V_SYNC)
-        puts("AWAKE DONE");
 }
 
 void
 barrier_handler()
 {
-    if (VERBOSE & V_SYNC)
-        puts("BARRIER INC");
     ++BARRIER;
     kill(getppid(), SIGUSR1);
 }
@@ -72,14 +57,10 @@ barrier_handler()
 void
 __wait()
 {
-    if (VERBOSE & V_SYNC)
-        puts("WAITING");
     static int WAIT_COUNTER = 0;
     ++WAIT_COUNTER;
     while (BARRIER < WAIT_COUNTER)
         sched_yield();
-    if (VERBOSE & V_SYNC)
-        puts("CONTINUING");
 }
 
 int
@@ -107,8 +88,7 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
 
     if (!(buf = malloc(new_length)))
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("malloc 1");
+        perror("malloc 1");
         return;
     }
 
@@ -135,13 +115,6 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
         }
     }
 
-    if (VERBOSE & V_INFO)
-    {
-        puts("PARENT 1st ITERATION:");
-        for (i = 0; i < length_med; ++i)
-            putchar(buf[i]);
-        puts("");
-    }
     mid_j = j;
 
     memcpy(map_out, buf, mid_j + 1);
@@ -165,13 +138,6 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
         }
     }
 
-    if (VERBOSE & V_INFO)
-    {
-        puts("PARENT 2nd ITERATION:");
-        for (i = length_med; i < length; ++i)
-            putchar(buf[i]);
-        puts("");
-    }
 
     memcpy(map_out + mid_j, buf + mid_j, new_length - mid_j);
     __awake(child);
@@ -189,14 +155,9 @@ do_child_stuff(char *map_out, int length)
 
     __wait();
 
-    if (VERBOSE & V_INFO)
-        printf("CHILD MAP-OUT LEN: %d\n", length);
-
-
     if (!(buf = malloc(length)))
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("malloc 1");
+        perror("malloc 1");
         return;
     }
 
@@ -217,17 +178,7 @@ do_child_stuff(char *map_out, int length)
         }
     }
 
-    if (VERBOSE & V_INFO)
-    {
-        puts("CHILD 1st ITERATION:");
-        for (i = 0; i < length_med; ++i)
-            putchar(buf[i]);
-        puts("");
-    }
-
     memcpy(map_out, buf, length_med);
-    if (VERBOSE & V_INFO)
-        printf("MEMCPY map-out <- buf [%d bytes]\n", length_med);
 
     __wait();
     memcpy(buf + length_med, map_out + length_med, length - length_med);
@@ -244,18 +195,8 @@ do_child_stuff(char *map_out, int length)
         }
     }
 
-    if (VERBOSE & V_INFO)
-    {
-        puts("CHILD 2nd ITERATION:");
-        for (i = length_med; i < length; ++i)
-            putchar(buf[i]);
-        puts("");
-    }
 
     memcpy(map_out + length_med, buf + length_med, length - length_med);
-    if (VERBOSE & V_INFO)
-        printf("MEMCPY map-out+%d <- buf+%d [%d bytes]\n", length_med,
-               length_med, length - length_med);
 
     free(buf);
 }
@@ -274,59 +215,48 @@ main(int argc, char *argv[])
 
     if (argc != 3)
     {
-        if (VERBOSE & ~V_NOERR)
-            fprintf(stderr, "Usage: %s <input_file> <output_file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <input_file> <output_file>\n", argv[0]);
         return 1;
     }
 
     if (!strcmp(argv[1], argv[2]))
     {
-        if (VERBOSE & ~V_NOERR)
-            fprintf(stderr, "Input and output file cant be the same\n");
+        fprintf(stderr, "Input and output file cant be the same\n");
         return 1;
     }
 
     if ((in_fd = open(argv[1], O_RDONLY)) < 0)
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("open 1");
+        perror("open 1");
         return 1;
     }
 
     if ((out_fd = open(argv[2], O_RDWR | O_TRUNC | O_CREAT, (mode_t) 0666)) < 0)
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("open 2");
+        perror("open 2");
         return 1;
     }
 
     if (fstat(in_fd, &in_stat))
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("fstat 1");
+        perror("fstat 1");
         return 1;
     }
 
     length = in_stat.st_size;
-    if (VERBOSE & V_INFO)
-        printf("ORIGINAL LENGTH: %d\n", length);
 
     map_in = mmap(NULL, length, PROT_READ, MAP_SHARED, in_fd, 0);
     if (map_in == MAP_FAILED)
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("mmap 1");
+        perror("mmap 1");
         return 1;
     }
 
     new_length = get_new_length(map_in, length);
-    if (VERBOSE & V_INFO)
-        printf("NEW LENGTH: %d\n", new_length);
 
     if (ftruncate(out_fd, new_length))
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("ftruncate");
+        perror("ftruncate");
         return 1;
     }
 
@@ -334,61 +264,48 @@ main(int argc, char *argv[])
     map_out = mmap(NULL, new_length, PROT_READ | PROT_WRITE, MAP_SHARED, out_fd, 0);
     if (map_out == MAP_FAILED)
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("mmap 2");
+        perror("mmap 2");
         return 1;
     }
 
     if (signal(SIGUSR1, pass) == SIG_ERR)
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("signal 1");
+        perror("signal 1");
         return 1;
     }
 
     switch (child = fork())
     {
         case -1:
-            if (VERBOSE & ~V_NOERR)
-                perror("fork");
+            perror("fork");
             exit(1);
 
         case 0: // child
-            if (VERBOSE & V_SYNC)
-                puts("SETTING HANDLER");
             if (signal(SIGUSR1, barrier_handler) == SIG_ERR)
             {
-                if (VERBOSE & ~V_NOERR)
-                    perror("signal 2");
+                perror("signal 2");
                 exit(0);
             }
             kill(getppid(), SIGUSR1);
-            if (VERBOSE & V_SYNC)
-                puts("DOING CHILD STUFF");
             do_child_stuff(map_out, new_length);
             exit(0);
 
         default: // parent
-            if (VERBOSE & V_SYNC)
-                puts("WAITING UNTIL HANDLER IS SET");
-            pause();
-            if (VERBOSE & V_SYNC)
-                puts("DOING PARENT STUFF");
+            while (!child_running)
+                pause();
             do_parent_stuff(map_in, map_out, length, new_length, child);
             break;
     }
 
     if (munmap(map_in, length))
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("munmap 1");
+        perror("munmap 1");
         return 1;
     }
 
     if (munmap(map_out, new_length))
     {
-        if (VERBOSE & ~V_NOERR)
-            perror("munmap 2");
+        perror("munmap 2");
         return 1;
     }
 
