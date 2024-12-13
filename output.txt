@@ -1,5 +1,1 @@
-uno:*a
-dos:**b
-tres:***c
-cuatro:****d
-,*,**,***,****
+asdda

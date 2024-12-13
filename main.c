@@ -77,25 +77,15 @@ get_new_length(char *map, int length)
 }
 
 void
-do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int child)
+do_parent_stuff(char *map_in, char *buf, int length, int new_length, int child)
 {
-    char *buf;
-    int   length_med;
-    int   i;     // map_in index
-    int   j = 0; // buf index
-    int   mid_j;
-
-
-    if (!(buf = malloc(new_length)))
-    {
-        perror("malloc 1");
-        return;
-    }
+    int length_med;
+    int i;     // map_in index
+    int j = 0; // buf index
 
     memset(buf, 0, new_length);
 
     length_med = (length + 1) >> 1;
-
 
     for (i = 0; i < length_med; ++i)
     {
@@ -115,9 +105,7 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
         }
     }
 
-    mid_j = j;
-
-    memcpy(map_out, buf, mid_j + 1);
+    /* Manda al hijo una señal para que continue la ejecucion */
     __awake(child);
 
     for (i = length_med; i < length; ++i)
@@ -138,67 +126,51 @@ do_parent_stuff(char *map_in, char *map_out, int length, int new_length, int chi
         }
     }
 
-
-    memcpy(map_out + mid_j, buf + mid_j, new_length - mid_j);
+    /* Manda al hijo una señal para que continue la ejecucion */
     __awake(child);
-
-    free(buf);
 }
 
 void
-do_child_stuff(char *map_out, int length)
+do_child_stuff(char *buf, int length)
 {
-    char *buf;
-    int   length_med;
-    int   i;
-    int   iterations;
+    int length_med;
+    int i;
+    int iterations;
 
+    /* Espera a que el padre procese la primera mitad del archivo */
     __wait();
-
-    if (!(buf = malloc(length)))
-    {
-        perror("malloc 1");
-        return;
-    }
-
 
     length_med = (length + 1) >> 1;
 
-    memcpy(buf, map_out, length_med);
-
+    // Este codigo esta repetido abajo
     for (i = 0; i < length_med; ++i)
     {
-        switch (map_out[i])
+        switch (buf[i])
         {
             case '0' ... '9':
-                iterations = map_out[i] - '0';
+                iterations = buf[i] - '0';
                 for (int j = 0; j < iterations; ++j)
                     buf[i + j] = '*';
                 break;
         }
     }
 
-    memcpy(map_out, buf, length_med);
-
+    /* Espera a que el padre procese la siguiente
+     * mitad del archivo */
     __wait();
-    memcpy(buf + length_med, map_out + length_med, length - length_med);
 
+    // Este codigo esta repetido arriba
     for (; i < length; ++i)
     {
-        switch (map_out[i])
+        switch (buf[i])
         {
             case '0' ... '9':
-                iterations = map_out[i] - '0';
+                iterations = buf[i] - '0';
                 for (int j = 0; j < iterations; ++j)
                     buf[i + j] = '*';
                 break;
         }
     }
-
-
-    memcpy(map_out + length_med, buf + length_med, length - length_med);
-
-    free(buf);
 }
 
 int
@@ -212,6 +184,7 @@ main(int argc, char *argv[])
     int         new_length;
     char       *map_in;
     char       *map_out;
+    char       *shared_buffer;
 
     if (argc != 3)
     {
@@ -252,15 +225,22 @@ main(int argc, char *argv[])
         return 1;
     }
 
+    /* Calcula el nuevo tamaño del archivo */
     new_length = get_new_length(map_in, length);
 
+    /* Cambia el tamaño del archivo de salida */
     if (ftruncate(out_fd, new_length))
     {
         perror("ftruncate");
         return 1;
     }
 
+    /* Buffer compartido entre el padre y el hijo, donde el padre va a
+     * escribir y el hijo va a leer y sobrescribir */
+    shared_buffer = mmap(NULL, new_length, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
+    /* Mapeo del archivo de salida */
     map_out = mmap(NULL, new_length, PROT_READ | PROT_WRITE, MAP_SHARED, out_fd, 0);
     if (map_out == MAP_FAILED)
     {
@@ -268,6 +248,7 @@ main(int argc, char *argv[])
         return 1;
     }
 
+    /* Asigna una señal al padre (y al hijo) que ignora SIGUSR1 */
     if (signal(SIGUSR1, pass) == SIG_ERR)
     {
         perror("signal 1");
@@ -281,21 +262,26 @@ main(int argc, char *argv[])
             exit(1);
 
         case 0: // child
+            /* Set the handler */
             if (signal(SIGUSR1, barrier_handler) == SIG_ERR)
             {
                 perror("signal 2");
                 exit(0);
             }
+            /* Say the parent that the handler is set yet */
             kill(getppid(), SIGUSR1);
-            do_child_stuff(map_out, new_length);
+            do_child_stuff(shared_buffer, new_length);
             exit(0);
 
         default: // parent
+            /* Wait until the child set their handler */
             while (!child_running)
                 pause();
-            do_parent_stuff(map_in, map_out, length, new_length, child);
+            do_parent_stuff(map_in, shared_buffer, length, new_length, child);
             break;
     }
+
+    memcpy(map_out, shared_buffer, new_length);
 
     if (munmap(map_in, length))
     {
